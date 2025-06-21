@@ -1,0 +1,10 @@
+## Critics
+
+Critics are a list of characters that will be used to generate responses to the user's input. Each critic will have:
+- a name
+- a voice ID for OpenAI + ElevenLabs
+- backstory (2 sentences)
+- personality (2 sentences)
+- snootiness (number from 0-100)
+- a list of likes
+- a list of dislikes

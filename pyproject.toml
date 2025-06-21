@@ -1,0 +1,33 @@
+[project]
+name = "lushfoil-critics-streamlit"
+version = "0.1.0"
+description = "Add your description here"
+authors = [
+    { name = "Shawn Squire", email = "shawn@shawnsquire.me" }
+]
+dependencies = [
+    "streamlit>=1.46.0",
+    "openai>=1.90.0",
+    "elevenlabs>=2.4.0",
+    "tinydb>=4.8.2",
+    "pyyaml>=6.0.1",
+]
+readme = "README.md"
+requires-python = ">= 3.12"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.rye]
+managed = true
+dev-dependencies = []
+
+[tool.rye.scripts]
+start = "streamlit run src/lushfoil_critics_streamlit/app.py"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/lushfoil_critics_streamlit"]
