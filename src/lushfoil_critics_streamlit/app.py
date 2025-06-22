@@ -7,6 +7,22 @@ import datetime, io, yaml, base64, json
 
 st.set_page_config(page_title="Lushfoil Critics", page_icon="🎨", initial_sidebar_state="collapsed")
 
+# Hide the default Streamlit page navigation in the sidebar
+st.markdown("""
+<style>
+    [data-testid="stSidebarNavItems"] {display: none;}
+</style>
+""", unsafe_allow_html=True)
+
+
+# --- Custom Sidebar Navigation ---
+st.sidebar.page_link("app.py", label="Lushfoil Critic", icon="🎨")
+st.sidebar.page_link("pages/log_viewer.py", label="Log Viewer", icon="📝")
+st.sidebar.divider()
+
+cfg = st.sidebar
+cfg.title("Settings")
+
 # --- config -----------------------------------------------------------------
 CRITICS_FILE = Path(__file__).parent / "critics.yaml"
 CRITIC_PROMPT_FILE = Path(__file__).parent / "critic_prompt.txt"
@@ -30,13 +46,30 @@ def load_critic_prompt():
     with open(CRITIC_PROMPT_FILE, 'r') as f:
         return f.read()
 
+def calculate_price(scores, snootiness):
+    """Calculates the offer price based on scores and critic snootiness."""
+    if not scores:
+        return 0
+
+    total_score = sum(scores.values())
+    # Volatility factor makes the price swing more for snootier critics.
+    volatility_factor = 1 + (snootiness / 100.0)  # Range 1.1 to 2.0
+
+    # Score delta from the average of 15 (for 3x 0-10 scores).
+    score_delta = total_score - 15
+
+    # Each point of score delta is worth $500, modified by volatility.
+    price_adjustment = score_delta * 500 * volatility_factor
+
+    final_price = 10000 + price_adjustment
+
+    # Ensure the price is at least a minimum value (e.g., $500).
+    return max(500, int(final_price))
+
 critics = load_critics()
 critics_by_name = {c['name']: c for c in critics}
 
 critic_prompt = load_critic_prompt()
-
-cfg = st.sidebar
-cfg.title("Settings")
 
 # Critic selection
 selected_critic_name = cfg.selectbox("Critic", options=list(critics_by_name.keys()))
@@ -77,36 +110,84 @@ else:
 
 # --- chat-&-voice ------------------------------------------------------------
 your_pitch = st.text_area("Your Pitch")
-if st.button("CRITIQUE!", type="primary"):
+if st.button("CRITIQUE!", type="primary", disabled=not st.session_state.upload):
     st.session_state.critique_data = None # Clear previous critique
     st.session_state.audio_to_download = None
-    prompt = critic_prompt.format(pitch=your_pitch, **selected_critic)
+    
+    # Prepare the prompt for the LLM
+    critic_data_for_prompt = selected_critic.copy()
+    scoring_categories_str = "\n".join([f"- **{cat}**" for cat in selected_critic['scoring_categories']])
+    critic_data_for_prompt['scoring_categories'] = scoring_categories_str
+    prompt = critic_prompt.format(pitch=your_pitch, **critic_data_for_prompt)
+    
+    # Encode the image
+    image_bytes = st.session_state.upload.getvalue()
+    base64_image = base64.b64encode(image_bytes).decode("utf-8")
+    mime_type = st.session_state.upload.type
+
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt},
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{mime_type};base64,{base64_image}"},
+                },
+            ],
+        }
+    ]
 
     client = OpenAI(api_key=st.secrets["openai_key"])
-    with st.spinner("Thinking..."):
+    with st.spinner("Critiquing..."):
         response = client.chat.completions.create(
             model="gpt-4o",
-            messages=[{"role": "user", "content": prompt}],
+            messages=messages,
             response_format={"type": "json_object"},  # Enforce JSON output
         )
-        st.session_state.critique_data = json.loads(response.choices[0].message.content)
+        critique_json = json.loads(response.choices[0].message.content)
+        
+        # Calculate and add the price to the critique data
+        scores = critique_json.get("scores", {})
+        price = calculate_price(scores, selected_critic['snootiness'])
+        critique_json['price'] = price
+        st.session_state.critique_data = critique_json
+
+        # --- logging -------------------------------------------------------------
+        LOGS_DIR = Path("logs")
+        LOGS_DIR.mkdir(exist_ok=True)
+        db = TinyDB(LOGS_DIR / "session_log.json")
+        db.insert({
+            "ts": datetime.datetime.utcnow().isoformat(),
+            "pitch": your_pitch,
+            "filename": st.session_state.upload.name if st.session_state.upload else None,
+            "response": st.session_state.critique_data,
+            "critic": selected_critic_name,
+            "voice_service": voice_service
+        })
 
 # --- display critique from session state --------------------------------------
 if st.session_state.critique_data:
     speech_raw = st.session_state.critique_data.get("speech_raw", "I have nothing to say.")
     scores = st.session_state.critique_data.get("scores", {})
+    price = st.session_state.critique_data.get("price", 0)
+
+    # Display the final offer price
+    st.subheader("The Verdict")
+    st.metric(label="Offer Price", value=f"${price:,}")
 
     # Display critique in an expander
-    with st.expander("View Critique Text", expanded=False):
+    with st.expander("View Full Critique & Scores", expanded=False):
+        st.markdown("#### Full Monologue")
         st.markdown(speech_raw)
-
-    # Display scores
-    if scores:
-        st.write("### Scores")
-        cols = st.columns(len(scores))
-        for i, (key, value) in enumerate(scores.items()):
-            with cols[i]:
-                st.metric(label=key, value=f"{value}/10")
+        st.markdown("---")
+        # Display scores
+        if scores:
+            st.markdown("#### Scores")
+            cols = st.columns(len(scores))
+            for i, (key, value) in enumerate(scores.items()):
+                with cols[i]:
+                    st.metric(label=key, value=f"{value}/10")
 
 
     # --- Voice Generation & Download ---
@@ -156,12 +237,4 @@ if st.session_state.critique_data:
         )
 
 
-    # --- logging -------------------------------------------------------------
-    db = TinyDB("session_log.json")
-    db.insert({
-        "ts": datetime.datetime.utcnow().isoformat(),
-        "prompt": prompt,
-        "response": st.session_state.critique_data,  # Log the full JSON object
-        "critic": selected_critic_name,
-        "voice_service": voice_service
-    })
+
