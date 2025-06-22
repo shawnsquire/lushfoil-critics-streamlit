@@ -1,6 +1,6 @@
 import streamlit as st
 from openai import OpenAI
-from elevenlabs import stream as elevenlabs_stream
+from elevenlabs.client import ElevenLabs
 from tinydb import TinyDB, Query
 from pathlib import Path
 import datetime, io, yaml, base64, json
@@ -24,6 +24,7 @@ cfg = st.sidebar
 cfg.title("Settings")
 
 # --- config -----------------------------------------------------------------
+elabs = ElevenLabs(api_key=st.secrets["elabs_key"]) if "elabs_key" in st.secrets else None
 CRITICS_FILE = Path(__file__).parent / "critics.yaml"
 CRITIC_PROMPT_FILE = Path(__file__).parent / "critic_prompt.txt"
 
@@ -196,13 +197,17 @@ if st.session_state.critique_data:
             if voice_service == "ElevenLabs Voice":
                 try:
                     audio_buf = io.BytesIO()
+                    if not elabs:
+                        st.error("ElevenLabs API key not found. Please add it to your secrets.")
+                        st.stop()
+
                     # ElevenLabs TTS (streaming)
-                    for pcm in elevenlabs_stream(
+                    audio_stream = elabs.text_to_speech.stream(
                         text=speech_raw,
-                        voice=selected_critic['eleven_voice_id'],
-                        api_key=st.secrets["elabs_key"]
-                    ):
-                        audio_buf.write(pcm)
+                        voice_id=selected_critic['eleven_voice_id']
+                    )
+                    for chunk in audio_stream:
+                        audio_buf.write(chunk)
                     
                     audio_buf.seek(0)
                     st.session_state.audio_to_download = audio_buf.read() # For download button
