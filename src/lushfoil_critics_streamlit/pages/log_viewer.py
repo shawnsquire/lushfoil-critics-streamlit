@@ -44,6 +44,16 @@ if LOG_FILE.exists():
             # Use an expander for each log entry
             expander_title = f"{timestamp} - {critic} on '{filename}'"
             with st.expander(expander_title):
+                image_path_str = log.get("image_path")
+                audio_path_str = log.get("audio_path")
+
+                # Display image and audio if they exist
+                if image_path_str and Path(image_path_str).exists():
+                    st.image(image_path_str, caption=f"Image for {filename}")
+                
+                if audio_path_str and Path(audio_path_str).exists():
+                    st.audio(audio_path_str, format='audio/mpeg')
+
                 st.metric(label="Offer Price", value=f"${price:,}")
                 if pitch and pitch != "No pitch provided.":
                     st.markdown(f"**Your Pitch:** {pitch}")
