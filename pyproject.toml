@@ -32,3 +32,6 @@ allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/lushfoil_critics_streamlit"]
+
+[tool.poetry.dependencies]
+python = ">=3.12,<4.0"
